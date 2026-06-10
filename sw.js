@@ -1,9 +1,9 @@
-const CACHE_NAME = "oficiopro-ia-v34";
+const CACHE_NAME = "oficiopro-ia-v35";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
-  "./app.js?v=34",
+  "./app.js?v=35",
   "./manifest.webmanifest",
   "./icon.svg"
 ];

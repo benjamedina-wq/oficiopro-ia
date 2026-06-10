@@ -336,7 +336,7 @@ function ensureSeedData() {
   state.visionMode = "local";
   state.companyReportDraft = state.companyReportDraft || "";
   state.fullTechnicalReportDraft = state.fullTechnicalReportDraft || "";
-  if (state.lastMigrationVersion !== 34) {
+  if (state.lastMigrationVersion !== 35) {
     state.selectedOrderId = "ord-hogar";
     state.selectedClientId = "cli-hogar";
     state.selectedPointId = "pto-hogar-ap";
@@ -366,7 +366,7 @@ function ensureSeedData() {
     if (["inicio", "clientes", "cierre", "presupuesto"].includes(state.selectedView)) {
       state.selectedView = "trabajo";
     }
-    state.lastMigrationVersion = 34;
+    state.lastMigrationVersion = 35;
   }
   if (!state.selectedOrderId || !state.orders.some((item) => item.id === state.selectedOrderId)) {
     state.selectedOrderId = "ord-hogar";
@@ -1572,7 +1572,7 @@ function runVoiceCommand(rawText) {
   }
   if (commandHas(text, ["generar presupuesto", "crear presupuesto", "hacer presupuesto", "armar presupuesto", "generar cotizacion", "crear cotizacion"])) {
     generateBudget();
-    return goToView("presupuesto", "Presupuesto generado.");
+    return goToView("informe", "Presupuesto generado y guardado.");
   }
   if (commandHas(text, ["generar informe empresa", "informe empresa", "reporte empresa", "informe reducido"])) {
     state.companyReportDraft = buildCompanyReport();
@@ -1586,8 +1586,8 @@ function runVoiceCommand(rawText) {
   }
   if (commandHas(text, ["nuevo cliente", "crear cliente", "agregar cliente", "alta cliente", "cargar cliente"])) {
     state.selectedClientId = "";
-    setView("clientes");
-    speak("Nuevo cliente listo.");
+    setView("trabajo");
+    speak("Carga el cliente desde la orden activa.");
     return;
   }
   if (commandHas(text, ["seleccionar cliente", "selecionar cliente", "elegir cliente", "buscar cliente"])) {
@@ -1596,7 +1596,7 @@ function runVoiceCommand(rawText) {
     if (found) {
       state.selectedClientId = found.id;
       saveState();
-      setView("clientes");
+      setView("trabajo");
       speak("Cliente seleccionado.");
     } else {
       speak("No encontre ese cliente.");
@@ -1694,14 +1694,13 @@ function runVoiceCommand(rawText) {
     const detail = commandDetail(text, ["agregar evento", "crear evento", "registrar evento", "comentario", "agregar comentario", "registrar comentario", "nota"]) || prompt("Dicta el evento") || "";
     return addComment(detail, "comentario");
   }
-  if (commandHas(text, ["ir a inicio", "abrir inicio"])) return goToView("inicio", "Inicio.");
-  if (commandHas(text, ["abrir clientes", "ir a clientes", "ver clientes"])) return goToView("clientes", "Clientes.");
-  if (commandHas(text, ["abrir ordenes", "ir a ordenes", "ver ordenes", "abrir relevamiento", "ir a relevamiento"])) return goToView("ordenes", "Ordenes.");
+  if (commandHas(text, ["ir a inicio", "abrir inicio", "abrir clientes", "ir a clientes", "ver clientes"])) return goToView("trabajo", "Trabajo.");
+  if (commandHas(text, ["abrir ordenes", "ir a ordenes", "ver ordenes", "abrir relevamiento", "ir a relevamiento"])) return goToView("ordenes", "Relevo.");
   if (commandHas(text, ["abrir trabajo", "ir a trabajo", "modo trabajo"])) return goToView("trabajo", "Trabajo en curso.");
   if (commandHas(text, ["abrir materiales", "ir a materiales", "ver materiales", "abrir evidencias", "ver evidencias"])) return goToView("materiales", "Materiales y evidencias.");
-  if (commandHas(text, ["abrir cierre", "ir a cierre", "ver checklist"])) return goToView("cierre", "Cierre.");
+  if (commandHas(text, ["abrir cierre", "ir a cierre", "ver checklist"])) return goToView("trabajo", "Trabajo.");
   if (commandHas(text, ["abrir informe", "ir a informe", "ver informe"])) return goToView("informe", "Informe.");
-  if (commandHas(text, ["abrir presupuesto", "ir a presupuesto", "ver presupuesto"])) return goToView("presupuesto", "Presupuesto.");
+  if (commandHas(text, ["abrir presupuesto", "ir a presupuesto", "ver presupuesto"])) return goToView("informe", "Informe.");
   voiceStatus = "Comando no reconocido. Usa: abrir trabajo, seleccionar punto, sacar foto, problema, material usado, generar presupuesto o generar informe.";
   saveState();
   render();
@@ -1723,7 +1722,7 @@ function runCommandSelfTest() {
     results.push(`${ok ? "OK" : "FALLA"} ${label}: ${command}`);
   };
 
-  test("abrir clientes", "Oficio abrir clientes", () => state.selectedView === "clientes");
+  test("abrir clientes redirige", "Oficio abrir clientes", () => state.selectedView === "trabajo");
   test("seleccionar cliente", "Oficio seleccionar cliente Hogar San Jose", () => state.selectedClientId === "cli-hogar");
   test("abrir relevamiento", "Oficio abrir relevamiento", () => state.selectedView === "ordenes");
   test("seleccionar AP", "Oficio seleccionar punto AP", () => {
@@ -1731,7 +1730,7 @@ function runCommandSelfTest() {
     return state.selectedView === "trabajo" && point && normalizeCommand(point.nombre + " " + point.tipo).includes("ap");
   });
   test("materiales navega", "Oficio abrir materiales", () => state.selectedView === "materiales");
-  test("presupuesto navega", "Oficio abrir presupuesto", () => state.selectedView === "presupuesto");
+  test("presupuesto redirige", "Oficio abrir presupuesto", () => state.selectedView === "informe");
   test("informe tecnico", "Oficio generar informe tecnico", () => state.selectedView === "informe" && Boolean(state.fullTechnicalReportDraft));
 
   state.selectedView = previous.view;
@@ -2115,7 +2114,6 @@ function renderShell(content, title, subtitle, actions = "") {
           <div><h1>${title}</h1><p>${subtitle}</p></div>
           <div class="actions">${actions}</div>
         </div>
-        <details class="compact-details voice-drawer no-print"><summary>Comandos de voz</summary>${renderVoiceBar()}</details>
         <input id="photoInputGlobal" class="no-print" type="file" accept="image/*" capture="environment" style="display:none" onchange="handlePhoto(this)">
         ${content}
       </main>
@@ -2417,13 +2415,6 @@ function renderTrabajo() {
   const pointSelect = orderSitePoints().length
     ? `<label>Punto activo<select onchange="selectSitePoint(this.value)">${orderSitePoints().map((point) => `<option value="${point.id}" ${selectedPoint?.id === point.id ? "selected" : ""}>${escapeHtml(point.nombre)}</option>`).join("")}</select></label>`
     : `<div class="empty">Agrega puntos de trabajo desde Ordenes.</div>`;
-  const steps = orderSteps().map((item) => `
-    <div class="step-row ${item.estado === "completado" ? "done" : ""}">
-      <div class="step-dot">${item.estado === "completado" ? "OK" : item.numero}</div>
-      <div><strong>${escapeHtml(item.titulo)}</strong><div class="mini muted">${escapeHtml(item.descripcion)}</div></div>
-      <span class="mini">${item.requiere_foto ? "foto" : ""}</span>
-    </div>
-  `).join("");
   const events = orderEvents().map((item) => `
     <div class="event ${escapeHtml(item.tipo_evento)}">
       <strong>${escapeHtml(item.tipo_evento)}</strong>
@@ -2458,32 +2449,12 @@ function renderTrabajo() {
           </div>
         </div>
         ${renderTaskLogSection()}
-        <details class="panel compact-details">
-          <summary>Puntos del sitio y evidencias</summary>
-          <p class="mini">Selecciona el punto antes de sacar foto. Al cargar una foto, queda asociada al punto activo y se marca como relevado.</p>
-          <div class="step-list" style="margin-top:12px">${renderSitePointRows("work")}</div>
-        </details>
-        <details class="panel compact-details">
-          <summary>Problemas resueltos</summary>
-          ${renderResolvedProblemsSection()}
-        </details>
-        <details class="panel compact-details">
-          <summary>Datos tecnicos</summary>
-          ${renderTechnicalDataSection()}
-        </details>
-        <details class="panel compact-details">
-          <summary>Flujo y pasos completos</summary>
-          <h2>Flujo del instalador</h2>
-          ${renderWorkflow("work")}
-          <h2 style="margin-top:16px">Pasos</h2>
-          <div class="step-list" style="margin-top:12px">${steps}</div>
-        </details>
       </div>
       <aside>
-        <details class="panel compact-details" open>
-          <summary>Bitacora</summary>
+        <div class="panel">
+          <h2>Bitacora</h2>
           <div class="timeline" style="margin-top:12px">${events}</div>
-        </details>
+        </div>
       </aside>
     </section>
   `;
@@ -2500,40 +2471,6 @@ function renderMateriales() {
   `).join("") || `<div class="empty">Sin materiales cargados.</div>`;
   const photos = state.evidence.filter((item) => item.orden_id === order().id).map((item) => {
     const point = orderSitePoints().find((point) => point.id === item.punto_id);
-    const scanOpen = state.selectedEvidenceId === item.id;
-    const scanSummary = item.scan_estado && item.scan_estado !== "pendiente"
-      ? `<div class="scan-summary"><strong>${escapeHtml(item.equipo_tipo || "equipo")}</strong>${item.ip_detectada ? ` · IP ${escapeHtml(item.ip_detectada)}` : ""}${item.respuesta_equipo ? `<br>${escapeHtml(item.respuesta_equipo)}` : ""}</div>`
-      : `<div class="scan-summary muted">Lectura tecnica pendiente</div>`;
-    const scanPanel = scanOpen ? `
-      <form class="scan-panel" onsubmit="event.preventDefault(); saveEvidenceScan(this);">
-        <input type="hidden" name="id" value="${escapeHtml(item.id)}">
-        <label>Contexto<select name="contexto_imagen">
-          ${["pantalla de configuracion", "router", "ap", "gabinete tecnico", "error de sistema", "prueba de conexion", "dvr/nvr"].map((type) => `<option value="${type}" ${item.contexto_imagen === type ? "selected" : ""}>${type}</option>`).join("")}
-        </select></label>
-        <label>Equipo<select name="equipo_tipo">
-          ${["access point", "router", "dvr", "nvr", "camara", "switch", "equipo"].map((type) => `<option value="${type}" ${item.equipo_tipo === type ? "selected" : ""}>${type}</option>`).join("")}
-        </select></label>
-        <label>IP detectada<input name="ip_detectada" value="${escapeHtml(item.ip_detectada || "")}" placeholder="Ej: 192.168.0.17"></label>
-        <label>MAC / serie<input name="mac_serie" value="${escapeHtml(item.mac_serie || "")}" placeholder="MAC, serie o ID"></label>
-        <label>Puerto / conexion<input name="puerto_conexion" value="${escapeHtml(item.puerto_conexion || "")}" placeholder="LAN1, PoE, HDMI, canal 1"></label>
-        <label class="full">Lectura OCR / pantalla<textarea name="lectura_ocr" placeholder="Texto leido: SSID, estado conectado, error, canal, IP, respuesta del equipo">${escapeHtml(item.lectura_ocr || "")}</textarea></label>
-        <label class="full">Respuesta del aparato<textarea name="respuesta_equipo" placeholder="Ej: AP conectado en Omada / NVR sin disco / Router entrega internet">${escapeHtml(item.respuesta_equipo || "")}</textarea></label>
-        <label class="full">Conclusion tecnica<textarea name="conclusion_tecnica" placeholder="Que significa esta lectura para el trabajo">${escapeHtml(item.conclusion_tecnica || "")}</textarea></label>
-        ${item.ai_extract_json ? `
-          <div class="ai-result full">
-            <strong>${escapeHtml(item.ai_categoria || "Extraccion IA")}: ${escapeHtml(item.ai_titulo || "Resultado tecnico")}</strong>
-            <p class="mini">${escapeHtml(item.ai_descripcion || "")}</p>
-            <pre>${escapeHtml(item.ai_extract_json)}</pre>
-          </div>
-        ` : `<div class="ai-result full muted">El analisis local gratis propone categoria, titulo, descripcion, equipo, IP, estado y JSON tecnico basico.</div>`}
-        <div class="actions full">
-          <button class="btn primary">Guardar lectura</button>
-          <button type="button" class="btn" data-action="ocr-evidence" data-id="${item.id}">Intentar OCR</button>
-          <button type="button" class="btn warning" data-action="ai-evidence" data-id="${item.id}">Analizar local gratis</button>
-          ${item.ai_extract_json ? `<button type="button" class="btn primary" data-action="task-from-evidence" data-id="${item.id}">Crear tarea</button>` : ""}
-        </div>
-      </form>
-    ` : "";
     return `
     <div class="photo photo-card">
       <img src="${item.url_archivo}" alt="${escapeHtml(item.descripcion)}">
@@ -2541,12 +2478,7 @@ function renderMateriales() {
         <strong>${escapeHtml(point?.nombre || "Orden general")}</strong><br>
         ${escapeHtml(item.descripcion)}<br>
         ${formatDate(item.created_at)}${item.latitud ? `<br>GPS ${escapeHtml(item.latitud)}, ${escapeHtml(item.longitud)}` : ""}
-        ${scanSummary}
-        <div class="actions" style="margin-top:8px">
-          <button class="btn" data-action="scan-evidence" data-id="${item.id}">${scanOpen ? "Cerrar lectura" : "Lectura tecnica"}</button>
-        </div>
       </div>
-      ${scanPanel}
     </div>
   `;
   }).join("") || `<div class="empty full">Sin fotos cargadas.</div>`;
@@ -2561,13 +2493,12 @@ function renderMateriales() {
       </div>
       <div class="panel">
         <h2>Evidencias</h2>
-        <div class="mini muted">Modo gratis: la app analiza con reglas locales y OCR del navegador si esta disponible. No llama a OpenAI.</div>
         <input id="photoInput" type="file" accept="image/*" capture="environment" onchange="handlePhoto(this)" style="margin:12px 0">
         <div class="photo-grid">${photos}</div>
       </div>
     </section>
   `;
-  return renderShell(content, "Evidencias", "Fotos, lectura tecnica local y materiales usados.");
+  return renderShell(content, "Evidencias", "Fotos y materiales usados.");
 }
 
 function toggleCheck(id) {
@@ -2677,7 +2608,6 @@ function renderPresupuesto() {
 
 function renderInforme() {
   if (!state.companyReportDraft) state.companyReportDraft = buildCompanyReport();
-  if (!state.fullTechnicalReportDraft) state.fullTechnicalReportDraft = buildFullTechnicalReport();
   const content = `
     <section class="grid">
       <div class="panel no-print">
@@ -2692,10 +2622,6 @@ function renderInforme() {
         <textarea style="min-height:160px" oninput="state.companyReportDraft=this.value; saveState();">${escapeHtml(state.companyReportDraft)}</textarea>
       </div>
       <article class="report">${state.companyReportDraft}</article>
-      <details class="panel compact-details no-print">
-        <summary>Ver informe tecnico completo</summary>
-        <textarea style="min-height:180px" oninput="state.fullTechnicalReportDraft=this.value; saveState();">${escapeHtml(state.fullTechnicalReportDraft)}</textarea>
-      </details>
     </section>
   `;
   return renderShell(content, "Informe", "Resumen editable de tareas, relevo, problemas y estado final.", `<button class="btn primary" onclick="window.print()">PDF</button>`);
@@ -2723,16 +2649,16 @@ async function shareBudget() {
 
 function render() {
   const views = {
-    inicio: renderInicio,
-    clientes: renderClientes,
     ordenes: renderOrdenes,
     trabajo: renderTrabajo,
     materiales: renderMateriales,
-    cierre: renderCierre,
-    presupuesto: renderPresupuesto,
     informe: renderInforme
   };
-  document.querySelector("#app").innerHTML = (views[state.selectedView] || renderInicio)();
+  if (!views[state.selectedView]) {
+    state.selectedView = "trabajo";
+    saveState();
+  }
+  document.querySelector("#app").innerHTML = views[state.selectedView]();
 }
 
 document.addEventListener("click", (event) => {
