@@ -10,11 +10,18 @@
   </head>
   <body>
     <div id="app"></div>
-    <script src="./app.js?v=35"></script>
     <script>
       if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("./sw.js").catch(() => {});
+        navigator.serviceWorker.getRegistrations()
+          .then((registrations) => registrations.forEach((registration) => registration.unregister()))
+          .catch(() => {});
+      }
+      if ("caches" in window) {
+        caches.keys()
+          .then((keys) => keys.filter((key) => key.includes("oficiopro-ia")).forEach((key) => caches.delete(key)))
+          .catch(() => {});
       }
     </script>
+    <script src="./app.js?v=37"></script>
   </body>
 </html>

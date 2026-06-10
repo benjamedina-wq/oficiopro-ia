@@ -134,7 +134,6 @@ const defaultState = {
   visionApiKey: "",
   visionMode: "local",
   companyReportDraft: "",
-  fullTechnicalReportDraft: "",
   checklist: [
     check("ord-demo", "internet verificado"),
     check("ord-demo", "energia verificada"),
@@ -148,8 +147,7 @@ const defaultState = {
     check("ord-demo", "cliente informado"),
     check("ord-demo", "conformidad del cliente")
   ],
-  selectedEvidenceId: "",
-  reportDraft: ""
+  selectedEvidenceId: ""
 };
 
 let state = loadState();
@@ -335,14 +333,14 @@ function ensureSeedData() {
   state.visionApiKey = "";
   state.visionMode = "local";
   state.companyReportDraft = state.companyReportDraft || "";
-  state.fullTechnicalReportDraft = state.fullTechnicalReportDraft || "";
-  if (state.lastMigrationVersion !== 35) {
+  delete state.fullTechnicalReportDraft;
+  delete state.reportDraft;
+  if (state.lastMigrationVersion !== 36) {
     state.selectedOrderId = "ord-hogar";
     state.selectedClientId = "cli-hogar";
     state.selectedPointId = "pto-hogar-ap";
     state.selectedTaskId = "task-hogar-inicio";
     state.companyReportDraft = "";
-    state.fullTechnicalReportDraft = "";
     const wifiStep = state.steps.find((item) => item.id === "step-ord-hogar-4");
     if (wifiStep) wifiStep.descripcion = "Configurar SSID HogarSanJose y clave final registrada como dato sensible.";
     const wifiWorkflow = state.workflowItems.find((item) => item.id === "wf-ord-hogar-configurar-red-wifi");
@@ -366,7 +364,7 @@ function ensureSeedData() {
     if (["inicio", "clientes", "cierre", "presupuesto"].includes(state.selectedView)) {
       state.selectedView = "trabajo";
     }
-    state.lastMigrationVersion = 35;
+    state.lastMigrationVersion = 36;
   }
   if (!state.selectedOrderId || !state.orders.some((item) => item.id === state.selectedOrderId)) {
     state.selectedOrderId = "ord-hogar";
@@ -967,7 +965,6 @@ async function finishWork() {
   order().longitud_fin = gps.longitud || order().longitud_fin;
   order().updated_at = nowIso();
   await addEvent("cierre", "Trabajo finalizado");
-  state.reportDraft = buildReport();
   if (!orderBudgetItems().length) {
     const orderId = order().id;
     const previousView = state.selectedView;
@@ -1580,9 +1577,9 @@ function runVoiceCommand(rawText) {
     return goToView("informe", "Informe para empresa generado.");
   }
   if (commandHas(text, ["generar informe tecnico", "informe tecnico", "reporte tecnico", "informe completo"])) {
-    state.fullTechnicalReportDraft = buildFullTechnicalReport();
+    state.companyReportDraft = buildCompanyReport();
     saveState();
-    return goToView("informe", "Informe tecnico generado.");
+    return goToView("informe", "Informe actualizado.");
   }
   if (commandHas(text, ["nuevo cliente", "crear cliente", "agregar cliente", "alta cliente", "cargar cliente"])) {
     state.selectedClientId = "";
@@ -1731,7 +1728,7 @@ function runCommandSelfTest() {
   });
   test("materiales navega", "Oficio abrir materiales", () => state.selectedView === "materiales");
   test("presupuesto redirige", "Oficio abrir presupuesto", () => state.selectedView === "informe");
-  test("informe tecnico", "Oficio generar informe tecnico", () => state.selectedView === "informe" && Boolean(state.fullTechnicalReportDraft));
+  test("informe visible", "Oficio generar informe tecnico", () => state.selectedView === "informe" && Boolean(state.companyReportDraft));
 
   state.selectedView = previous.view;
   state.selectedPointId = previous.point;
@@ -1875,7 +1872,7 @@ function generateBudget() {
   }
   items.push({
     categoria: "documentacion",
-    concepto: "Informe tecnico y evidencias",
+    concepto: "Informe y evidencias",
     detalle: "Armado de informe final, fotos, checklist y recomendaciones.",
     cantidad: 1,
     unidad: "servicio",
@@ -1905,58 +1902,6 @@ function addBudgetItemWithoutRender(orderId, data) {
   });
 }
 
-function buildReport() {
-  const c = client();
-  const o = order();
-  const events = orderEvents().reverse();
-  const materials = orderMaterials();
-  const checklist = orderChecklist();
-  const points = orderSitePoints();
-  const workflow = orderWorkflow();
-  const doneSteps = orderSteps().filter((item) => item.estado === "completado");
-  const problems = events.filter((item) => item.tipo_evento === "problema");
-  const tests = events.filter((item) => item.tipo_evento === "prueba" || item.descripcion.toLowerCase().includes("prueba"));
-
-  return `
-    <h1>Informe tecnico OficioPro IA</h1>
-    <p><strong>Cliente:</strong> ${escapeHtml(c.nombre)}<br>
-    <strong>Fecha:</strong> ${formatDate(o.fecha_fin || nowIso())}<br>
-    <strong>Tecnico:</strong> ${escapeHtml(o.tecnico)}<br>
-    <strong>Orden:</strong> ${escapeHtml(o.numero)}<br>
-    <strong>Trabajo realizado:</strong> ${escapeHtml(o.tipo_trabajo)}</p>
-
-    <h2>Resumen</h2>
-    <p>Se realizo ${escapeHtml(o.descripcion)}. El trabajo fue registrado en campo mediante bitacora, materiales, evidencias y checklist operativo.</p>
-
-    <h2>Tareas realizadas</h2>
-    <ul>${doneSteps.map((item) => `<li>${escapeHtml(item.titulo)}: ${escapeHtml(item.descripcion)}</li>`).join("") || "<li>Sin pasos completados registrados.</li>"}</ul>
-
-    <h2>Flujo operativo de la orden</h2>
-    <ul>${workflow.map((item) => `<li>${item.estado === "completado" ? "OK" : "Pendiente"} - ${escapeHtml(item.titulo)}: ${escapeHtml(item.detalle)}</li>`).join("") || "<li>Sin flujo operativo generado.</li>"}</ul>
-
-    <h2>Puntos de trabajo relevados</h2>
-    <ul>${points.map((item) => `<li>${item.estado === "relevado" ? "OK" : "Pendiente"} - ${escapeHtml(item.nombre)} (${escapeHtml(item.tipo)}). ${escapeHtml(item.descripcion)}${item.latitud ? ` GPS ${escapeHtml(item.latitud)}, ${escapeHtml(item.longitud)}.` : ""}${item.observacion ? ` ${escapeHtml(item.observacion)}` : ""}</li>`).join("") || "<li>Sin puntos tecnicos registrados.</li>"}</ul>
-
-    <h2>Materiales usados</h2>
-    <ul>${materials.map((item) => `<li>${escapeHtml(item.nombre_material)} ${escapeHtml(item.cantidad)} ${escapeHtml(item.unidad)} ${item.observacion ? `- ${escapeHtml(item.observacion)}` : ""}</li>`).join("") || "<li>Sin materiales cargados.</li>"}</ul>
-
-    <h2>Incidencias y soluciones</h2>
-    <ul>${problems.map((item) => `<li>${escapeHtml(item.descripcion)} (${formatDate(item.created_at)})</li>`).join("") || "<li>No se registraron incidencias.</li>"}</ul>
-
-    <h2>Pruebas realizadas</h2>
-    <ul>${tests.map((item) => `<li>${escapeHtml(item.descripcion)}</li>`).join("") || "<li>Checklist de pruebas completado segun items marcados.</li>"}</ul>
-
-    <h2>Checklist</h2>
-    <ul>${checklist.map((item) => `<li>${item.estado === "completado" ? "OK" : "Pendiente"} - ${escapeHtml(item.descripcion)}</li>`).join("")}</ul>
-
-    <h2>Recomendaciones</h2>
-    <p>Revisar estado de conectividad 4G periodicamente, mantener protegidas las conexiones exteriores y conservar las credenciales de acceso remoto en un lugar seguro.</p>
-
-    <h2>Conformidad del cliente</h2>
-    <p>Firma y aclaracion: ______________________________________________</p>
-  `;
-}
-
 function buildCompanyReport() {
   const c = client();
   const o = order();
@@ -1979,32 +1924,6 @@ function buildCompanyReport() {
     <strong>IP AP:</strong> ${escapeHtml(tech.ip || "")}<br>
     <strong>SSID:</strong> ${escapeHtml(tech.ssid || "")}<br>
     <strong>Clave WiFi:</strong> ${escapeHtml(tech.clave_wifi || "")}</p>
-  `;
-}
-
-function buildFullTechnicalReport() {
-  const c = client();
-  const o = order();
-  const tasks = orderTaskLogs();
-  const tech = orderTechnicalData();
-  const problems = orderResolvedProblems();
-  const photos = state.evidence.filter((item) => item.orden_id === o.id);
-  return `
-    <h1>Informe tecnico completo</h1>
-    <p><strong>Cliente:</strong> ${escapeHtml(c.nombre)}<br>
-    <strong>Orden:</strong> ${escapeHtml(o.numero)}<br>
-    <strong>Trabajo:</strong> ${escapeHtml(o.descripcion)}<br>
-    <strong>Tecnico:</strong> ${escapeHtml(o.tecnico)}</p>
-    <h2>Todos los pasos / tareas</h2>
-    <ul>${tasks.map((item) => `<li>${escapeHtml(item.hora)} - ${escapeHtml(item.categoria)} - <strong>${escapeHtml(item.titulo)}</strong>: ${escapeHtml(item.descripcion)}</li>`).join("")}</ul>
-    <h2>Datos tecnicos</h2>
-    <ul>${tech.map((item) => `<li>${escapeHtml(item.equipo)} ${escapeHtml(item.marca)} ${escapeHtml(item.modelo)} Â· Nombre: ${escapeHtml(item.nombre_asignado)} Â· IP: ${escapeHtml(item.ip)} Â· Usuario: ${escapeHtml(item.usuario)} Â· SSID: ${escapeHtml(item.ssid)} Â· Observaciones: ${escapeHtml(item.observaciones)}</li>`).join("") || "<li>Sin datos tecnicos.</li>"}</ul>
-    <h2>Problemas, causas y soluciones</h2>
-    <ul>${problems.map((item) => `<li><strong>${escapeHtml(item.problema)}</strong><br>Causa: ${escapeHtml(item.causa)}<br>Solucion: ${escapeHtml(item.solucion)}<br>Resultado: ${escapeHtml(item.resultado)}</li>`).join("") || "<li>Sin problemas registrados.</li>"}</ul>
-    <h2>Fotos y evidencias</h2>
-    <ul>${photos.map((item) => `<li>${escapeHtml(item.descripcion)} - ${formatDate(item.created_at)}${item.equipo_tipo ? `<br>Equipo: ${escapeHtml(item.equipo_tipo)}` : ""}${item.contexto_imagen ? `<br>Contexto: ${escapeHtml(item.contexto_imagen)}` : ""}${item.ip_detectada ? `<br>IP: ${escapeHtml(item.ip_detectada)}` : ""}${item.puerto_conexion ? `<br>Conexion: ${escapeHtml(item.puerto_conexion)}` : ""}${item.respuesta_equipo ? `<br>Respuesta: ${escapeHtml(item.respuesta_equipo)}` : ""}${item.lectura_ocr ? `<br>Lectura/OCR: ${escapeHtml(item.lectura_ocr)}` : ""}${item.conclusion_tecnica ? `<br>Conclusion: ${escapeHtml(item.conclusion_tecnica)}` : ""}${item.ai_titulo ? `<br>IA: ${escapeHtml(item.ai_categoria)} - ${escapeHtml(item.ai_titulo)}. ${escapeHtml(item.ai_descripcion || "")}` : ""}</li>`).join("") || "<li>Sin fotos cargadas.</li>"}</ul>
-    <h2>Recomendaciones</h2>
-    <p>Guardar credenciales Omada en lugar seguro, mantener AP conectado por cable al router, documentar futuros cambios de SSID/clave y revisar periodicamente estado del AP en Omada.</p>
   `;
 }
 
@@ -2704,7 +2623,6 @@ window.addResolvedProblemFromForm = addResolvedProblemFromForm;
 window.saveTechnicalData = saveTechnicalData;
 window.toggleTechnicalSecrets = toggleTechnicalSecrets;
 window.buildCompanyReport = buildCompanyReport;
-window.buildFullTechnicalReport = buildFullTechnicalReport;
 window.startAssistant = startAssistant;
 window.runCommandSelfTest = runCommandSelfTest;
 render();
