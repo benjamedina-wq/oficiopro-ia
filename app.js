@@ -1,7 +1,7 @@
 ﻿const storeKey = "oficiopro-ia-mvp-v1";
 
 const defaultState = {
-  selectedView: "inicio",
+  selectedView: "trabajo",
   selectedClientId: "cli-hogar",
   selectedOrderId: "ord-hogar",
   selectedPointId: "pto-hogar-ap",
@@ -336,7 +336,7 @@ function ensureSeedData() {
   state.visionMode = "local";
   state.companyReportDraft = state.companyReportDraft || "";
   state.fullTechnicalReportDraft = state.fullTechnicalReportDraft || "";
-  if (state.lastMigrationVersion !== 26) {
+  if (state.lastMigrationVersion !== 34) {
     state.selectedOrderId = "ord-hogar";
     state.selectedClientId = "cli-hogar";
     state.selectedPointId = "pto-hogar-ap";
@@ -363,7 +363,10 @@ function ensureSeedData() {
     state.resolvedProblems
       .filter((item) => item.order_id === "ord-hogar" && item.solucion?.includes("julian1901"))
       .forEach((item) => { item.solucion = item.solucion.replace("julian1901", "registrada como dato sensible"); });
-    state.lastMigrationVersion = 26;
+    if (["inicio", "clientes", "cierre", "presupuesto"].includes(state.selectedView)) {
+      state.selectedView = "trabajo";
+    }
+    state.lastMigrationVersion = 34;
   }
   if (!state.selectedOrderId || !state.orders.some((item) => item.id === state.selectedOrderId)) {
     state.selectedOrderId = "ord-hogar";
@@ -2095,28 +2098,24 @@ async function completeDemoClose() {
 
 function renderShell(content, title, subtitle, actions = "") {
   const nav = [
-    ["inicio", "Inicio"],
-    ["clientes", "Clientes"],
-    ["ordenes", "Ordenes"],
     ["trabajo", "Trabajo"],
-    ["materiales", "Materiales"],
-    ["cierre", "Cierre"],
-    ["presupuesto", "Presupuesto"],
+    ["ordenes", "Relevo"],
+    ["materiales", "Evidencias"],
     ["informe", "Informe"]
   ];
   return `
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand"><div class="brand-mark">OP</div><span>OficioPro IA</span></div>
+        <div class="brand"><div class="brand-mark">OP</div><span>OficioPro Lite</span></div>
         <nav class="nav">${nav.map(([id, label]) => `<button class="${state.selectedView === id ? "active" : ""}" onclick="setView('${id}')">${label}</button>`).join("")}</nav>
-        <div class="sidebar-note">Comando base: <strong>Oficio</strong>. Puedes probar voz real o escribir comandos como "Oficio, iniciar trabajo".</div>
+        <div class="sidebar-note">Modo campo: registrar trabajo, relevo, evidencias e informe.</div>
       </aside>
       <main class="main">
         <div class="topbar">
           <div><h1>${title}</h1><p>${subtitle}</p></div>
           <div class="actions">${actions}</div>
         </div>
-        ${renderVoiceBar()}
+        <details class="compact-details voice-drawer no-print"><summary>Comandos de voz</summary>${renderVoiceBar()}</details>
         <input id="photoInputGlobal" class="no-print" type="file" accept="image/*" capture="environment" style="display:none" onchange="handlePhoto(this)">
         ${content}
       </main>
@@ -2248,13 +2247,13 @@ function renderTaskLogSection() {
   }).join("") || `<div class="empty">Sin tareas horarias registradas.</div>`;
   return `
     <div class="panel">
-      <h2>Registro de tareas por horario</h2>
+      <h2>Tareas / relevo</h2>
       <form class="form-grid" onsubmit="event.preventDefault(); addTaskLogFromForm(this);">
         <label>Hora<input type="time" name="hora" value="${new Date().toTimeString().slice(0, 5)}"></label>
         <label>Categoria<select name="categoria">${categories.map((item) => `<option>${item}</option>`).join("")}</select></label>
         <label class="full">Titulo<input name="titulo" placeholder="Ej: Adopcion del AP en Omada" required></label>
         <label class="full">Descripcion<textarea name="descripcion" placeholder="Detalle de la tarea realizada"></textarea></label>
-        <div class="actions full"><button class="btn primary">Agregar tarea</button></div>
+        <div class="actions full"><button class="btn primary">Guardar tarea</button></div>
       </form>
       <div class="task-list">${rows}</div>
     </div>
@@ -2375,7 +2374,7 @@ function renderOrdenes() {
       </section>
     </div>
   `;
-  return renderShell(form, "Ordenes de trabajo", "Crear ordenes, planificar puntos de trabajo y exigir evidencias por ubicacion.");
+  return renderShell(form, "Relevo", "Puntos de trabajo, recorrido, ubicaciones y evidencias requeridas.");
 }
 
 function renderVoiceBar() {
@@ -2488,7 +2487,7 @@ function renderTrabajo() {
       </aside>
     </section>
   `;
-  return renderShell(content, "Trabajo en curso", "Registro de campo con voz, fotos, eventos y cronometro.");
+  return renderShell(content, "Trabajo", "Lo imprescindible para registrar la instalacion en campo.");
 }
 
 function renderMateriales() {
@@ -2554,21 +2553,21 @@ function renderMateriales() {
   const content = `
     <section class="grid cols-2">
       <div class="panel">
-        <h2>Materiales usados</h2>
+        <h2>Materiales</h2>
         <div class="actions" style="margin:12px 0"><button class="btn warning" onclick="addMaterialFromText(prompt('Material usado') || '')">Cargar material</button></div>
         <div class="material-list">${rows}</div>
         <h2 style="margin-top:18px">Puntos relevados</h2>
         <div class="step-list" style="margin-top:12px">${renderSitePointRows("work")}</div>
       </div>
       <div class="panel">
-        <h2>Fotos y evidencias</h2>
+        <h2>Evidencias</h2>
         <div class="mini muted">Modo gratis: la app analiza con reglas locales y OCR del navegador si esta disponible. No llama a OpenAI.</div>
         <input id="photoInput" type="file" accept="image/*" capture="environment" onchange="handlePhoto(this)" style="margin:12px 0">
         <div class="photo-grid">${photos}</div>
       </div>
     </section>
   `;
-  return renderShell(content, "Materiales y evidencias", "Carga manual o por voz de materiales, fotos y pruebas.");
+  return renderShell(content, "Evidencias", "Fotos, lectura tecnica local y materiales usados.");
 }
 
 function toggleCheck(id) {
@@ -2677,38 +2676,29 @@ function renderPresupuesto() {
 }
 
 function renderInforme() {
-  if (!state.reportDraft) state.reportDraft = buildReport();
   if (!state.companyReportDraft) state.companyReportDraft = buildCompanyReport();
   if (!state.fullTechnicalReportDraft) state.fullTechnicalReportDraft = buildFullTechnicalReport();
   const content = `
     <section class="grid">
       <div class="panel no-print">
-        <h2>Informes del trabajo</h2>
+        <h2>Informe de tareas y relevo</h2>
         <div class="actions" style="margin-top:12px">
-          <button class="btn primary" onclick="state.companyReportDraft=buildCompanyReport(); saveState(); render();">Generar informe para empresa</button>
-          <button class="btn" onclick="state.fullTechnicalReportDraft=buildFullTechnicalReport(); saveState(); render();">Generar informe tecnico completo</button>
+          <button class="btn primary" onclick="state.companyReportDraft=buildCompanyReport(); saveState(); render();">Actualizar informe</button>
           <button class="btn" onclick="window.print()">Exportar PDF</button>
         </div>
       </div>
       <div class="panel no-print">
-        <h2>Informe para empresa</h2>
+        <h2>Texto editable</h2>
         <textarea style="min-height:160px" oninput="state.companyReportDraft=this.value; saveState();">${escapeHtml(state.companyReportDraft)}</textarea>
       </div>
       <article class="report">${state.companyReportDraft}</article>
-      <div class="panel no-print">
-        <h2>Informe tecnico completo</h2>
+      <details class="panel compact-details no-print">
+        <summary>Ver informe tecnico completo</summary>
         <textarea style="min-height:180px" oninput="state.fullTechnicalReportDraft=this.value; saveState();">${escapeHtml(state.fullTechnicalReportDraft)}</textarea>
-      </div>
-      <article class="report">${state.fullTechnicalReportDraft}</article>
-      <div class="panel no-print">
-        <h2>Informe general anterior</h2>
-        <textarea style="min-height:160px" oninput="state.reportDraft=this.value; saveState();">${escapeHtml(state.reportDraft)}</textarea>
-        <div class="actions" style="margin-top:12px"><button class="btn" onclick="state.reportDraft=buildReport(); saveState(); render();">Regenerar IA</button><button class="btn primary" onclick="window.print()">Exportar PDF</button><button class="btn" onclick="shareReport()">Compartir</button></div>
-      </div>
-      <article class="report">${state.reportDraft}</article>
+      </details>
     </section>
   `;
-  return renderShell(content, "Informe final", "Informe profesional editable y exportable a PDF.", `<button class="btn primary" onclick="window.print()">Exportar PDF</button>`);
+  return renderShell(content, "Informe", "Resumen editable de tareas, relevo, problemas y estado final.", `<button class="btn primary" onclick="window.print()">PDF</button>`);
 }
 
 async function shareReport() {

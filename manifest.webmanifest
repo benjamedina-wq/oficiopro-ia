@@ -1,8 +1,8 @@
 {
-  "name": "OficioPro IA",
+  "name": "OficioPro Lite Campo",
   "short_name": "OficioPro",
   "description": "Registro de trabajos tecnicos con fotos, evidencias, tareas e informes.",
-  "start_url": "./index.html?v=33",
+  "start_url": "./index.html?v=34",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f5f7f4",
