@@ -13,10 +13,38 @@ Aplicacion estatica lista para publicar en Netlify.
 
 ## Modo actual
 
-- Modo gratis/local.
-- No llama a OpenAI.
-- No consume credito.
-- Los datos se guardan en el navegador del dispositivo.
+- La app web funciona estatica en GitHub Pages/Netlify.
+- El Registro Inteligente funciona en modo local si no hay backend.
+- Para Gemini, Whisper, PaddleOCR y Supabase se usa el backend seguro de `backend/`.
+- La clave Gemini nunca va en el frontend: va en `backend/.env` como `GEMINI_API_KEY`.
+- Los datos locales se guardan en el navegador; con Supabase se sincronizan desde backend.
+
+## Registro Inteligente
+
+Pantalla Trabajo incluye:
+
+- Boton grande `Grabar voz`.
+- Campo de observacion rapida.
+- Boton `Sacar foto`.
+- Linea de tiempo inteligente.
+- Pendientes detectados.
+- Boton `Generar informe final`.
+
+## Backend seguro
+
+Ver carpeta `backend/`.
+
+Endpoints:
+
+- `POST /api/ai/summarize-work-log`
+- `POST /api/audio/transcribe-work-audio`
+- `POST /api/ai/analyze-work-photo`
+
+Variables:
+
+- `GEMINI_API_KEY`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
 
 ## Archivos incluidos
 

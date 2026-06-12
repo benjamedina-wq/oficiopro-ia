@@ -190,6 +190,21 @@ p {
   background: transparent;
 }
 
+.record-btn {
+  min-height: 64px;
+  border-radius: 8px;
+  padding: 0 22px;
+  background: var(--danger);
+  color: #fff;
+  font-weight: 900;
+  border: 1px solid var(--danger);
+}
+
+.record-btn.recording {
+  background: #7a1f18;
+  box-shadow: 0 0 0 4px rgba(177, 58, 47, 0.18);
+}
+
 .grid {
   display: grid;
   gap: 16px;
@@ -327,6 +342,67 @@ textarea {
 
 .current-step p {
   color: #d9eade;
+}
+
+.smart-register {
+  display: grid;
+  gap: 14px;
+}
+
+.smart-header,
+.smart-event-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.smart-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+
+.smart-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(240px, 0.8fr);
+  gap: 14px;
+}
+
+.smart-timeline {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.smart-event,
+.audio-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfdfb;
+}
+
+.smart-event p {
+  margin: 8px 0;
+}
+
+.pending-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.audio-row audio {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+.warning-text {
+  color: #8b5a12;
 }
 
 .quick-grid {
@@ -678,12 +754,14 @@ textarea {
   .grid.cols-3,
   .form-grid,
   .budget-row,
-  .workflow-row,
-  .task-row {
+    .workflow-row,
+  .task-row,
+  .smart-grid {
     grid-template-columns: 1fr;
   }
 
-  .quick-grid {
+  .quick-grid,
+  .smart-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -698,6 +776,7 @@ textarea {
   }
 
   .quick-grid,
+  .smart-actions,
   .photo-grid,
   .voice-input,
   .scan-panel {
@@ -711,6 +790,11 @@ textarea {
   .voice-actions {
     flex-direction: column;
     min-width: 104px;
+  }
+
+  .smart-header,
+  .smart-event-head {
+    display: grid;
   }
 
   .actions .btn {

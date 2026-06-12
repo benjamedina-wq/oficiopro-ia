@@ -133,7 +133,11 @@ const defaultState = {
   visionEndpoint: "",
   visionApiKey: "",
   visionMode: "local",
+  backendUrl: "",
   companyReportDraft: "",
+  smartEvents: [],
+  audioLogs: [],
+  pendingDetected: [],
   checklist: [
     check("ord-demo", "internet verificado"),
     check("ord-demo", "energia verificada"),
@@ -162,6 +166,8 @@ let suppressSpeech = false;
 let pendingPhotoPointId = "";
 let pendingPhotoTaskId = "";
 let tickTimer = null;
+let mediaRecorder = null;
+let audioChunks = [];
 
 function nowIso() {
   return new Date().toISOString();
@@ -332,7 +338,11 @@ function ensureSeedData() {
   state.visionEndpoint = "";
   state.visionApiKey = "";
   state.visionMode = "local";
+  state.backendUrl = state.backendUrl || "";
   state.companyReportDraft = state.companyReportDraft || "";
+  state.smartEvents = state.smartEvents || [];
+  state.audioLogs = state.audioLogs || [];
+  state.pendingDetected = state.pendingDetected || [];
   delete state.fullTechnicalReportDraft;
   delete state.reportDraft;
   if (state.lastMigrationVersion !== 36) {
@@ -923,6 +933,238 @@ async function addEvent(tipo, descripcion, pasoId = currentStep()?.id) {
   });
   saveState();
   render();
+}
+
+function smartEvents() {
+  return (state.smartEvents || []).filter((item) => item.orden_id === order().id);
+}
+
+function audioLogs() {
+  return (state.audioLogs || []).filter((item) => item.orden_id === order().id);
+}
+
+function normalizeBackendUrl() {
+  return String(state.backendUrl || "").trim().replace(/\/+$/, "");
+}
+
+function localWorkLogSummary(text) {
+  const value = String(text || "").trim();
+  const normalized = normalizeCommand(value);
+  const materials = ["cable", "ficha", "router", "camara", "nvr", "dvr", "ap", "switch", "fuente", "canaleta"]
+    .filter((item) => normalized.includes(item));
+  const problem = ["problema", "error", "falla", "no funciona", "desconectado"].some((item) => normalized.includes(item));
+  const pending = ["pendiente", "falta", "queda", "hay que"].some((item) => normalized.includes(item));
+  const done = ["terminado", "finalizado", "listo", "probado", "funciona"].some((item) => normalized.includes(item));
+  return {
+    sector: currentSitePoint()?.nombre || "Trabajo general",
+    tarea: value.slice(0, 90) || "Registro manual",
+    avance: value,
+    materiales,
+    problema_detectado: problem ? value : "",
+    pendientes: pending ? value : "",
+    estado: done ? "terminado" : problem ? "problema" : pending ? "pendiente" : "en curso",
+    resumen: value || "Registro guardado."
+  };
+}
+
+async function summarizeWorkText(text, source = "manual", audioId = "") {
+  const backend = normalizeBackendUrl();
+  let summary = null;
+  if (backend) {
+    try {
+      const response = await fetch(`${backend}/api/ai/summarize-work-log`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          trabajo_id: order().id,
+          cliente_id: client().id,
+          obra_id: order().id,
+          usuario_id: order().tecnico || "",
+          texto: text,
+          hora_evento: nowIso()
+        })
+      });
+      if (response.ok) summary = await response.json();
+    } catch {
+      summary = null;
+    }
+  }
+  if (!summary) summary = localWorkLogSummary(text);
+
+  const item = {
+    id: uid("smart"),
+    orden_id: order().id,
+    cliente_id: client().id,
+    source,
+    audio_id: audioId,
+    texto_original: text,
+    ia_json: summary,
+    sector: summary.sector || "",
+    tarea: summary.tarea || "",
+    estado: summary.estado || "",
+    pendientes: Array.isArray(summary.pendientes) ? summary.pendientes.join(", ") : summary.pendientes || "",
+    created_at: nowIso()
+  };
+  state.smartEvents.unshift(item);
+  if (item.pendientes) state.pendingDetected.unshift({ id: uid("pend"), orden_id: order().id, texto: item.pendientes, created_at: nowIso(), estado: "pendiente" });
+  await addEvent(source === "audio" ? "voz" : "comentario", summary.resumen || text);
+  saveState();
+  render();
+  return item;
+}
+
+function saveBackendConfig(form) {
+  const data = Object.fromEntries(new FormData(form));
+  state.backendUrl = String(data.backendUrl || "").trim();
+  saveState();
+  render();
+}
+
+async function addSmartManualNote(form) {
+  const data = Object.fromEntries(new FormData(form));
+  if (!data.texto) return;
+  await summarizeWorkText(data.texto, "manual");
+  form.reset();
+}
+
+async function toggleSmartRecording() {
+  if (mediaRecorder && mediaRecorder.state === "recording") {
+    mediaRecorder.stop();
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    voiceStatus = "Este navegador no permite grabar audio. Usa la observacion escrita.";
+    render();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data?.size) audioChunks.push(event.data);
+    };
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach((track) => track.stop());
+      const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || "audio/webm" });
+      await saveSmartAudio(blob);
+      audioChunks = [];
+      mediaRecorder = null;
+    };
+    mediaRecorder.start();
+    voiceStatus = "Grabando audio de trabajo...";
+    render();
+  } catch {
+    voiceStatus = "No se pudo acceder al microfono.";
+    render();
+  }
+}
+
+async function saveSmartAudio(blob) {
+  const id = uid("aud");
+  const audioUrl = URL.createObjectURL(blob);
+  const audioLog = {
+    id,
+    orden_id: order().id,
+    cliente_id: client().id,
+    url: audioUrl,
+    transcripcion: "",
+    ia_json: {},
+    created_at: nowIso()
+  };
+  state.audioLogs.unshift(audioLog);
+  saveState();
+  render();
+
+  const backend = normalizeBackendUrl();
+  if (backend) {
+    try {
+      const form = new FormData();
+      form.append("audio", blob, `${id}.webm`);
+      form.append("trabajo_id", order().id);
+      form.append("cliente_id", client().id);
+      form.append("obra_id", order().id);
+      form.append("usuario_id", order().tecnico || "");
+      const response = await fetch(`${backend}/api/audio/transcribe-work-audio`, { method: "POST", body: form });
+      if (response.ok) {
+        const result = await response.json();
+        audioLog.transcripcion = result.transcripcion || "";
+        audioLog.ia_json = result.ia_json || {};
+        if (audioLog.transcripcion) {
+          await summarizeWorkText(audioLog.transcripcion, "audio", id);
+        }
+      }
+    } catch {
+      voiceStatus = "Audio guardado local. Backend no disponible.";
+    }
+  } else {
+    voiceStatus = "Audio guardado local. Configura backend para transcribir con Whisper.";
+  }
+  saveState();
+  render();
+}
+
+async function analyzeWorkPhoto(evidenceId) {
+  const item = (state.evidence || []).find((entry) => entry.id === evidenceId);
+  if (!item) return;
+  const backend = normalizeBackendUrl();
+  let result = null;
+  if (backend) {
+    try {
+      const blob = await (await fetch(item.url_archivo)).blob();
+      const form = new FormData();
+      form.append("foto", blob, `${item.id}.jpg`);
+      form.append("trabajo_id", order().id);
+      form.append("cliente_id", client().id);
+      form.append("obra_id", order().id);
+      form.append("sector", currentSitePoint()?.nombre || item.descripcion || "");
+      form.append("usuario_id", order().tecnico || "");
+      const response = await fetch(`${backend}/api/ai/analyze-work-photo`, { method: "POST", body: form });
+      if (response.ok) result = await response.json();
+    } catch {
+      result = null;
+    }
+  }
+  const ai = result?.ia_json || localVisionFallback(item, item.lectura_ocr || "");
+  item.ocr_texto = result?.ocr_texto || item.lectura_ocr || "";
+  item.ai_extract_json = JSON.stringify(ai, null, 2);
+  item.ai_titulo = ai.tipo_trabajo || ai.titulo_tarea || "Foto de trabajo analizada";
+  item.ai_descripcion = ai.resumen || ai.descripcion_tecnica || "";
+  item.respuesta_equipo = ai.estado || item.respuesta_equipo || "";
+  item.scan_estado = backend && result ? "analizada backend" : "analizada local";
+  await addEvent("foto", item.ai_descripcion || `Foto analizada: ${item.descripcion}`);
+  saveState();
+  render();
+}
+
+function generateSmartFinalReport() {
+  const entries = smartEvents();
+  const photos = state.evidence.filter((item) => item.orden_id === order().id);
+  const pending = (state.pendingDetected || []).filter((item) => item.orden_id === order().id && item.estado !== "resuelto");
+  const lines = entries.map((item) => {
+    const data = item.ia_json || {};
+    return `<li><strong>${escapeHtml(data.tarea || item.tarea || "Registro")}</strong><br>${escapeHtml(data.resumen || item.texto_original || "")}</li>`;
+  }).join("");
+  state.companyReportDraft = `
+    <h1>INFORME FINAL DE TRABAJO</h1>
+    <p><strong>Cliente:</strong> ${escapeHtml(client().nombre)}<br>
+    <strong>Trabajo:</strong> ${escapeHtml(order().tipo_trabajo)}<br>
+    <strong>Inicio:</strong> ${formatDate(order().fecha_inicio || nowIso())}<br>
+    <strong>Fin:</strong> ${order().fecha_fin ? formatDate(order().fecha_fin) : "En curso"}<br>
+    <strong>Estado:</strong> ${escapeHtml(order().estado)}</p>
+    <h2>Tareas realizadas</h2>
+    <ul>${lines || "<li>Sin registros inteligentes todavia.</li>"}</ul>
+    <h2>Observaciones y problemas</h2>
+    <ul>${entries.filter((item) => item.ia_json?.problema_detectado).map((item) => `<li>${escapeHtml(item.ia_json.problema_detectado)}</li>`).join("") || "<li>Sin problemas detectados.</li>"}</ul>
+    <h2>Pendientes</h2>
+    <ul>${pending.map((item) => `<li>${escapeHtml(item.texto)}</li>`).join("") || "<li>Sin pendientes detectados.</li>"}</ul>
+    <h2>Materiales usados o detectados</h2>
+    <ul>${entries.flatMap((item) => item.ia_json?.materiales || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("") || "<li>Sin materiales detectados por IA.</li>"}</ul>
+    <h2>Fotos relevantes</h2>
+    <ul>${photos.map((item) => `<li>${escapeHtml(item.descripcion)} - ${formatDate(item.created_at)}</li>`).join("") || "<li>Sin fotos cargadas.</li>"}</ul>
+  `;
+  saveState();
+  setView("informe");
 }
 
 async function startWork() {
@@ -1672,7 +1914,27 @@ function runVoiceCommand(rawText) {
   }
   if (commandHas(text, ["iniciar trabajo", "empezar trabajo", "arrancar trabajo", "comenzar trabajo"])) return startWork();
   if (commandHas(text, ["pausar trabajo", "pausa trabajo", "poner pausa", "detener trabajo"])) return pauseWork();
+  if (commandHas(text, ["continuar trabajo", "seguir trabajo", "reanudar trabajo"])) return startWork();
   if (commandHas(text, ["finalizar trabajo", "terminar trabajo", "cerrar trabajo", "fin trabajo"])) return finishWork();
+  if (commandHas(text, ["generar resumen", "resumen automatico", "generar informe final", "informe final"])) return generateSmartFinalReport();
+  if (commandHas(text, ["marcar pendiente", "registrar pendiente", "agregar pendiente"])) {
+    const detail = commandDetail(text, ["marcar pendiente", "registrar pendiente", "agregar pendiente"]) || prompt("Pendiente") || "";
+    if (detail) {
+      state.pendingDetected.unshift({ id: uid("pend"), orden_id: order().id, texto: detail, created_at: nowIso(), estado: "pendiente" });
+      summarizeWorkText(`Pendiente: ${detail}`, "voz");
+    }
+    return;
+  }
+  if (commandHas(text, ["registrar observacion", "registrar observación", "observacion", "observación"])) {
+    const detail = commandDetail(text, ["registrar observacion", "registrar observación", "observacion", "observación"]) || prompt("Observacion") || "";
+    if (detail) return summarizeWorkText(detail, "voz");
+    return;
+  }
+  if (commandHas(text, ["marcar terminado", "trabajo terminado", "terminado"])) {
+    completeStep();
+    summarizeWorkText("Tarea marcada como terminada.", "voz");
+    return;
+  }
   if (commandHas(text, ["paso completo", "paso completado", "completar paso", "siguiente paso", "paso listo"])) return completeStep();
   if (commandHas(text, ["sacar foto", "tomar foto", "agregar foto", "cargar foto", "foto punto", "foto evidencia"])) {
     document.querySelector("#photoInput")?.click();
@@ -2177,6 +2439,72 @@ function renderTaskLogSection() {
   `;
 }
 
+function renderSmartWorkRegister() {
+  const recording = mediaRecorder && mediaRecorder.state === "recording";
+  const backend = normalizeBackendUrl();
+  const entries = smartEvents();
+  const audios = audioLogs();
+  const pending = (state.pendingDetected || []).filter((item) => item.orden_id === order().id && item.estado !== "resuelto");
+  const timeline = entries.map((item) => {
+    const data = item.ia_json || {};
+    return `
+      <div class="smart-event">
+        <div class="smart-event-head">
+          <strong>${escapeHtml(data.tarea || item.tarea || "Registro")}</strong>
+          <span class="status">${escapeHtml(data.estado || item.estado || "en curso")}</span>
+        </div>
+        <div class="mini muted">${formatDate(item.created_at)} · ${escapeHtml(data.sector || item.sector || "Trabajo general")}</div>
+        <p>${escapeHtml(data.resumen || item.texto_original || "")}</p>
+        ${data.materiales?.length ? `<div class="mini"><strong>Materiales:</strong> ${data.materiales.map(escapeHtml).join(", ")}</div>` : ""}
+        ${data.problema_detectado ? `<div class="mini danger-text"><strong>Problema:</strong> ${escapeHtml(data.problema_detectado)}</div>` : ""}
+        ${data.pendientes ? `<div class="mini warning-text"><strong>Pendiente:</strong> ${escapeHtml(Array.isArray(data.pendientes) ? data.pendientes.join(", ") : data.pendientes)}</div>` : ""}
+      </div>
+    `;
+  }).join("") || `<div class="empty">Todavia no hay registros inteligentes.</div>`;
+  const audioRows = audios.slice(0, 3).map((item) => `
+    <div class="audio-row">
+      <audio controls src="${item.url}"></audio>
+      <div class="mini">${item.transcripcion ? escapeHtml(item.transcripcion) : "Audio guardado. Transcripcion pendiente si no hay backend."}</div>
+    </div>
+  `).join("");
+  const pendingRows = pending.map((item) => `<li>${escapeHtml(item.texto)}</li>`).join("") || "<li>Sin pendientes detectados.</li>";
+  return `
+    <div class="panel smart-register">
+      <div class="smart-header">
+        <div>
+          <h2>Registro inteligente</h2>
+          <p class="mini">Voz, fotos, avances, pendientes y resumen automatico del trabajo activo.</p>
+        </div>
+        <span class="status">${backend ? "Backend conectado" : "Modo local"}</span>
+      </div>
+      <div class="smart-actions">
+        <button class="record-btn ${recording ? "recording" : ""}" onclick="toggleSmartRecording()">${recording ? "Detener" : "Grabar voz"}</button>
+        <button class="btn primary" onclick="document.querySelector('#photoInput').click()">Sacar foto</button>
+        <button class="btn" onclick="generateSmartFinalReport()">Generar informe final</button>
+      </div>
+      <form class="form-grid backend-form" onsubmit="event.preventDefault(); saveBackendConfig(this);">
+        <label class="full">URL backend seguro<input name="backendUrl" value="${escapeHtml(state.backendUrl || "")}" placeholder="http://127.0.0.1:42822"></label>
+        <div class="actions full"><button class="btn">Guardar backend</button></div>
+      </form>
+      <form class="form-grid" onsubmit="event.preventDefault(); addSmartManualNote(this);">
+        <label class="full">Observacion rapida<textarea name="texto" placeholder="Ej: dejamos cable pasado por cielorraso, falta crimpear ficha en camara 2"></textarea></label>
+        <div class="actions full"><button class="btn primary">Ordenar con IA</button></div>
+      </form>
+      <div class="smart-grid">
+        <div>
+          <h3>Linea de tiempo inteligente</h3>
+          <div class="smart-timeline">${timeline}</div>
+        </div>
+        <div>
+          <h3>Pendientes detectados</h3>
+          <ul class="mini pending-list">${pendingRows}</ul>
+          ${audioRows ? `<h3 style="margin-top:12px">Audios</h3>${audioRows}` : ""}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderResolvedProblemsSection() {
   const rows = orderResolvedProblems().map((item) => `
     <div class="problem-row">
@@ -2367,6 +2695,7 @@ function renderTrabajo() {
             <button class="btn primary" onclick="finishWork()">Finalizar</button>
           </div>
         </div>
+        ${renderSmartWorkRegister()}
         ${renderTaskLogSection()}
       </div>
       <aside>
@@ -2397,6 +2726,9 @@ function renderMateriales() {
         <strong>${escapeHtml(point?.nombre || "Orden general")}</strong><br>
         ${escapeHtml(item.descripcion)}<br>
         ${formatDate(item.created_at)}${item.latitud ? `<br>GPS ${escapeHtml(item.latitud)}, ${escapeHtml(item.longitud)}` : ""}
+        ${item.ai_descripcion ? `<br><strong>IA:</strong> ${escapeHtml(item.ai_descripcion)}` : ""}
+        ${item.ocr_texto ? `<br><strong>OCR:</strong> ${escapeHtml(item.ocr_texto)}` : ""}
+        <div class="actions" style="margin-top:8px"><button class="btn" data-action="analyze-work-photo" data-id="${item.id}">Analizar foto</button></div>
       </div>
     </div>
   `;
@@ -2594,6 +2926,7 @@ document.addEventListener("click", (event) => {
   if (action === "scan-evidence") return state.selectedEvidenceId === id ? (state.selectedEvidenceId = "", saveState(), render()) : selectEvidenceForScan(id);
   if (action === "ocr-evidence") return runNativeOcr(id);
   if (action === "ai-evidence") return analyzeEvidenceWithAI(id);
+  if (action === "analyze-work-photo") return analyzeWorkPhoto(id);
   if (action === "task-from-evidence") return saveExtractionAsTask(id);
   if (action === "survey-point") return markSitePointSurveyed(id, prompt("Observacion del punto") || "");
   if (action === "remove-point") return removeSitePoint(id);
@@ -2625,6 +2958,11 @@ window.toggleTechnicalSecrets = toggleTechnicalSecrets;
 window.buildCompanyReport = buildCompanyReport;
 window.startAssistant = startAssistant;
 window.runCommandSelfTest = runCommandSelfTest;
+window.toggleSmartRecording = toggleSmartRecording;
+window.saveBackendConfig = saveBackendConfig;
+window.addSmartManualNote = addSmartManualNote;
+window.analyzeWorkPhoto = analyzeWorkPhoto;
+window.generateSmartFinalReport = generateSmartFinalReport;
 render();
 clearInterval(tickTimer);
 tickTimer = setInterval(() => {
